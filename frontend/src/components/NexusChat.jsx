@@ -10,14 +10,17 @@ import {
   Terminal,
   RefreshCw,
   MessageSquare,
-  Clock,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 
-// Lightweight Markdown to HTML formatter for structured tables, lists, and bold text
+// Lightweight Markdown renderer for tables, lists, bold text, and code
 function FormattedMessage({ content }) {
   if (!content) return null;
 
-  // Split lines
   const lines = content.split('\n');
   const elements = [];
   let tableRows = [];
@@ -28,7 +31,7 @@ function FormattedMessage({ content }) {
   const flushTable = (key) => {
     if (tableRows.length > 0) {
       const headerRow = tableRows[0];
-      const dataRows = tableRows.slice(2); // Skip separator row
+      const dataRows = tableRows.slice(2);
       elements.push(
         <div key={`table-${key}`} className="table-container" style={{ margin: '0.6rem 0' }}>
           <table style={{ fontSize: '0.8rem' }}>
@@ -74,13 +77,16 @@ function FormattedMessage({ content }) {
     return text
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/`([^`]+)`/g, '<code style="background:var(--bg-subtle);padding:0.1rem 0.3rem;border-radius:3px;font-size:0.85em;">$1</code>');
+      .replace(
+        /`([^`]+)`/g,
+        '<code style="background:var(--bg-subtle);padding:0.1rem 0.35rem;border-radius:3px;font-size:0.85em;font-family:var(--font-mono);">$1</code>'
+      );
   };
 
   lines.forEach((line, index) => {
     const trimmed = line.trim();
 
-    // Markdown Table Row
+    // Table rows
     if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
       if (!inTable) {
         if (inList) flushList(index);
@@ -96,18 +102,16 @@ function FormattedMessage({ content }) {
       flushTable(index);
     }
 
-    // Markdown Bullet List
+    // Bullet points
     if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-      if (!inList) {
-        inList = true;
-      }
+      if (!inList) inList = true;
       listItems.push(trimmed.slice(2));
       return;
     } else if (inList) {
       flushList(index);
     }
 
-    // Markdown Heading 3
+    // Headings
     if (trimmed.startsWith('### ')) {
       elements.push(
         <h4 key={index} style={{ fontSize: '0.9rem', fontWeight: 600, margin: '0.6rem 0 0.2rem 0' }}>
@@ -117,7 +121,6 @@ function FormattedMessage({ content }) {
       return;
     }
 
-    // Markdown Heading 2
     if (trimmed.startsWith('## ')) {
       elements.push(
         <h3 key={index} style={{ fontSize: '0.98rem', fontWeight: 600, margin: '0.75rem 0 0.3rem 0' }}>
@@ -127,13 +130,11 @@ function FormattedMessage({ content }) {
       return;
     }
 
-    // Empty line
     if (!trimmed) {
       elements.push(<div key={index} style={{ height: '0.4rem' }} />);
       return;
     }
 
-    // Regular line
     elements.push(
       <p
         key={index}
@@ -153,19 +154,26 @@ export default function NexusChat({ role, onActionCompleted }) {
   const [conversations, setConversations] = useState([]);
   const [activeConvId, setActiveConvId] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [pendingAction, setPendingAction] = useState(null);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [expandedTools, setExpandedTools] = useState({});
+  const [showSidebar, setShowSidebar] = useState(true);
 
+  const messagesScrollRef = useRef(null);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
     loadConversations();
   }, [role]);
 
+  // Scroll smoothly to bottom when messages or loading changes
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [messages, loading, pendingAction]);
 
   const loadConversations = async () => {
     try {
@@ -176,7 +184,6 @@ export default function NexusChat({ role, onActionCompleted }) {
       if (list.length > 0) {
         loadConversation(list[0]._id);
       } else {
-        // Create initial default conversation
         handleNewChat();
       }
     } catch (err) {
@@ -188,9 +195,11 @@ export default function NexusChat({ role, onActionCompleted }) {
     setActiveConvId(id);
     try {
       const res = await apiRequest(`/ai/conversations/${id}`);
-      setMessages(res.conversation?.messages || []);
+      const conv = res.conversation;
+      setMessages(conv?.messages || []);
+      setPendingAction(conv?.pendingAction || null);
     } catch (err) {
-      console.error('Error loading conversation messages:', err);
+      console.error('Error loading conversation:', err);
     }
   };
 
@@ -204,8 +213,9 @@ export default function NexusChat({ role, onActionCompleted }) {
       setConversations((prev) => [newConv, ...prev]);
       setActiveConvId(newConv._id);
       setMessages(newConv.messages || []);
+      setPendingAction(null);
     } catch (err) {
-      alert(`Could not start new chat: ${err.message}`);
+      alert(`Could not create new chat: ${err.message}`);
     }
   };
 
@@ -249,12 +259,13 @@ export default function NexusChat({ role, onActionCompleted }) {
 
       if (res.conversation) {
         setMessages(res.conversation.messages);
-        // Refresh conversations list to update title if updated
-        const updatedListRes = await apiRequest('/ai/conversations');
-        setConversations(updatedListRes.conversations || []);
+        setPendingAction(res.conversation.pendingAction || null);
+
+        // Refresh conversation titles in sidebar
+        const updatedList = await apiRequest('/ai/conversations');
+        setConversations(updatedList.conversations || []);
       }
 
-      // Notify parent to refresh tables/earnings if tool ran
       if (res.toolExecutions && res.toolExecutions.length > 0 && onActionCompleted) {
         onActionCompleted();
       }
@@ -272,152 +283,209 @@ export default function NexusChat({ role, onActionCompleted }) {
     }
   };
 
-  // Quick Prompt Pills tailored by role
-  const getQuickPrompts = () => {
+  // Handle User Confirmation Decision (Clicking Confirm or Cancel on Write Operation)
+  const handleActionDecision = async (confirmed) => {
+    if (!activeConvId || actionLoading) return;
+    setActionLoading(true);
+
+    try {
+      const res = await apiRequest(`/ai/conversations/${activeConvId}/action-decision`, {
+        method: 'POST',
+        body: JSON.stringify({ confirmed }),
+      });
+
+      if (res.conversation) {
+        setMessages(res.conversation.messages);
+        setPendingAction(null);
+      }
+
+      if (confirmed && onActionCompleted) {
+        onActionCompleted();
+      }
+    } catch (err) {
+      alert(`Error processing confirmation: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Requested Quick Action options for prompt buttons
+  const getQuickOptions = () => {
     if (role === 'admin') {
       return [
-        'Who am I? Tell me about myself',
-        'Show platform statistics',
-        'List all pending users',
-        'List recent orders',
+        { label: "Show today's users approval", prompt: 'Show users waiting for approval' },
+        { label: 'Show new orders', prompt: 'Show new orders' },
+        { label: 'Orders to review', prompt: 'Show orders to review' },
+        { label: 'Recent products', prompt: 'Show recent products' },
+        { label: 'Show platform stats', prompt: 'Show platform statistics' },
+        { label: 'Who am I?', prompt: 'Who am I? Tell me about myself.' },
       ];
     }
     if (role === 'seller') {
       return [
-        'Who am I? Tell me about myself',
-        'Show my earnings & upcoming revenue',
-        'List my products & inventory',
-        'List my incoming orders',
+        { label: 'Orders to review', prompt: 'Show my orders to review' },
+        { label: 'Show new orders', prompt: 'Show new customer orders' },
+        { label: 'Recent products', prompt: 'Show recent products' },
+        { label: 'Show my earnings', prompt: 'Show my earnings and upcoming revenue' },
+        { label: 'List my products', prompt: 'List my products in inventory' },
+        { label: 'Who am I?', prompt: 'Who am I? Tell me about myself.' },
       ];
     }
     return [
-      'Who am I? Tell me about myself',
-      'Browse marketplace products',
-      'Show my order history',
+      { label: 'Recent products', prompt: 'Show recent products in marketplace' },
+      { label: 'Show new orders', prompt: 'Show my new orders' },
+      { label: 'Orders to review', prompt: 'Show my orders status' },
+      { label: 'Browse catalog', prompt: 'Browse products with discounts' },
+      { label: 'Who am I?', prompt: 'Who am I? Tell me about myself.' },
     ];
   };
 
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '260px 1fr',
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-md)',
-        height: '650px',
-        overflow: 'hidden',
-        boxShadow: 'var(--shadow-sm)',
-      }}
-    >
-      {/* Sidebar: Multiple Conversations History */}
+    <div className="full-chatbox-container">
+      {/* Sidebar: Multi-Chat History for all user types */}
+      {showSidebar && (
+        <div
+          style={{
+            width: '280px',
+            flexShrink: 0,
+            borderRight: '1px solid var(--border)',
+            background: 'var(--bg-app)',
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            minHeight: 0,
+          }}
+        >
+          {/* Sidebar Header */}
+          <div
+            style={{
+              padding: '0.85rem 1rem',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 600, fontSize: '0.875rem' }}>
+              <Sparkles size={16} />
+              <span>Conversations</span>
+            </div>
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+              onClick={handleNewChat}
+              title="Start a new chat conversation"
+            >
+              <Plus size={13} /> New Chat
+            </button>
+          </div>
+
+          {/* Scrollable Conversation List */}
+          <div
+            style={{
+              flex: '1 1 0%',
+              minHeight: 0,
+              overflowY: 'auto',
+              padding: '0.6rem',
+            }}
+          >
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, padding: '0.25rem 0.5rem', textTransform: 'uppercase' }}>
+              Chat History ({conversations.length})
+            </div>
+            {conversations.map((c) => {
+              const isActive = c._id === activeConvId;
+              return (
+                <div
+                  key={c._id}
+                  onClick={() => loadConversation(c._id)}
+                  style={{
+                    padding: '0.55rem 0.75rem',
+                    borderRadius: 'var(--radius-sm)',
+                    marginBottom: '0.35rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    background: isActive ? 'var(--bg-surface)' : 'transparent',
+                    border: isActive ? '1px solid var(--border)' : '1px solid transparent',
+                    fontSize: '0.8125rem',
+                    fontWeight: isActive ? 600 : 400,
+                    color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', overflow: 'hidden' }}>
+                    <MessageSquare size={13} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '170px' }}>
+                      {c.title || 'Conversation'}
+                    </span>
+                  </div>
+                  <button
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: '0.15rem',
+                    }}
+                    onClick={(e) => handleDeleteConversation(c._id, e)}
+                    title="Delete conversation"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Main Full-Width Chat Area */}
       <div
         style={{
-          borderRight: '1px solid var(--border)',
-          background: 'var(--bg-app)',
+          flex: '1 1 0%',
+          minHeight: 0,
           display: 'flex',
           flexDirection: 'column',
           height: '100%',
+          overflow: 'hidden',
+          background: 'var(--bg-surface)',
         }}
       >
+        {/* Chat Top Header */}
         <div
           style={{
-            padding: '0.85rem 1rem',
-            borderBottom: '1px solid var(--border)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 600, fontSize: '0.875rem' }}>
-            <Sparkles size={16} />
-            <span>Nexus AI</span>
-          </div>
-          <button
-            className="btn btn-secondary btn-sm"
-            style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
-            onClick={handleNewChat}
-            title="Start new conversation"
-          >
-            <Plus size={13} /> New
-          </button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, padding: '0.35rem 0.5rem', textTransform: 'uppercase' }}>
-            Saved Conversations ({conversations.length})
-          </div>
-          {conversations.map((c) => {
-            const isActive = c._id === activeConvId;
-            return (
-              <div
-                key={c._id}
-                onClick={() => loadConversation(c._id)}
-                style={{
-                  padding: '0.55rem 0.75rem',
-                  borderRadius: 'var(--radius-sm)',
-                  marginBottom: '0.25rem',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  background: isActive ? 'var(--bg-surface)' : 'transparent',
-                  border: isActive ? '1px solid var(--border)' : '1px solid transparent',
-                  fontSize: '0.8125rem',
-                  fontWeight: isActive ? 600 : 400,
-                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', overflow: 'hidden' }}>
-                  <MessageSquare size={13} style={{ flexShrink: 0 }} />
-                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '150px' }}>
-                    {c.title || 'Conversation'}
-                  </span>
-                </div>
-                <button
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-muted)',
-                    cursor: 'pointer',
-                    padding: '0.1rem',
-                  }}
-                  onClick={(e) => handleDeleteConversation(c._id, e)}
-                  title="Delete chat"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Main Chat Pane */}
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {/* Chat Header */}
-        <div
-          style={{
-            padding: '0.85rem 1.25rem',
+            padding: '0.75rem 1.25rem',
             borderBottom: '1px solid var(--border)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             background: 'var(--bg-surface)',
+            flexShrink: 0,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Nexus AI Copilot</span>
-            <span className="nav-badge" style={{ fontSize: '0.65rem' }}>
-              {role.toUpperCase()} ASSISTANT
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <button
+              onClick={() => setShowSidebar(!showSidebar)}
+              className="btn btn-secondary btn-sm"
+              style={{ padding: '0.25rem 0.45rem' }}
+              title={showSidebar ? 'Hide chat history sidebar' : 'Show chat history sidebar'}
+            >
+              {showSidebar ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <span style={{ fontWeight: 600, fontSize: '0.925rem' }}>Nexus AI Copilot</span>
+              <span className="nav-badge" style={{ fontSize: '0.65rem', textTransform: 'uppercase' }}>
+                LangChain {role} Agent
+              </span>
+            </div>
           </div>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Gemini Free LLM Tool Calling
+            Gemini + LangChain HITL Tools
           </span>
         </div>
 
-        {/* Quick Prompts */}
+        {/* Quick Action Pills Row */}
         <div
           style={{
             padding: '0.5rem 1rem',
@@ -425,109 +493,149 @@ export default function NexusChat({ role, onActionCompleted }) {
             borderBottom: '1px solid var(--border)',
             display: 'flex',
             gap: '0.45rem',
-            flexWrap: 'wrap',
+            overflowX: 'auto',
             alignItems: 'center',
+            flexShrink: 0,
           }}
         >
-          <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>Suggestions:</span>
-          {getQuickPrompts().map((p, i) => (
+          <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)', fontWeight: 500 }}>Quick Actions:</span>
+          {getQuickOptions().map((opt, i) => (
             <button
               key={i}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.725rem', padding: '0.15rem 0.45rem' }}
-              onClick={() => sendMessage(p)}
-              disabled={loading}
+              className="quick-action-chip"
+              onClick={() => sendMessage(opt.prompt)}
+              disabled={loading || actionLoading}
             >
-              {p}
+              {opt.label}
             </button>
           ))}
         </div>
 
-        {/* Messages Stream */}
+        {/* Messages Stream with Smooth Native Scroll */}
         <div
+          ref={messagesScrollRef}
           style={{
-            flex: 1,
-            padding: '1.25rem',
+            flex: '1 1 0%',
+            minHeight: 0,
             overflowY: 'auto',
+            padding: '1.25rem',
             display: 'flex',
             flexDirection: 'column',
             gap: '1rem',
+            WebkitOverflowScrolling: 'touch',
           }}
         >
-          {messages.map((msg, idx) => (
-            <div key={idx} className={`chat-bubble ${msg.role}`}>
-              {/* Formatted Markdown Content */}
-              <FormattedMessage content={msg.content} />
+          {messages.map((msg, idx) => {
+            const isLastAssistantMsg = msg.role === 'assistant' && idx === messages.length - 1;
+            const hasPendingAction = isLastAssistantMsg && pendingAction;
 
-              {/* Collapsible Executed Tools */}
-              {msg.toolExecutions && msg.toolExecutions.length > 0 && (
-                <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }}>
-                  <div
-                    style={{
-                      fontSize: '0.725rem',
-                      fontWeight: 600,
-                      marginBottom: '0.35rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.35rem',
-                      color: 'var(--text-secondary)',
-                    }}
-                  >
-                    <Terminal size={12} />
-                    <span>Executed Tools ({msg.toolExecutions.length})</span>
+            return (
+              <div key={idx} className={`chat-bubble ${msg.role}`} style={{ maxWidth: '85%' }}>
+                {/* Clean Formatted Markdown Output */}
+                <FormattedMessage content={msg.content} />
+
+                {/* Database Write Confirmation Card if action requires agreement */}
+                {hasPendingAction && (
+                  <div className="confirmation-card">
+                    <div className="confirmation-header">
+                      <AlertTriangle size={15} color="#b45309" />
+                      <span>{pendingAction.actionName || 'Confirmation Required for Database Update'}</span>
+                    </div>
+                    <div className="confirmation-summary">
+                      {pendingAction.summary}
+                    </div>
+                    <div className="confirmation-actions">
+                      <button
+                        className="btn-confirm"
+                        onClick={() => handleActionDecision(true)}
+                        disabled={actionLoading}
+                      >
+                        <CheckCircle size={14} />
+                        {actionLoading ? 'Applying Changes...' : 'Confirm & Apply Changes'}
+                      </button>
+                      <button
+                        className="btn-cancel-action"
+                        onClick={() => handleActionDecision(false)}
+                        disabled={actionLoading}
+                      >
+                        <XCircle size={14} />
+                        Cancel
+                      </button>
+                    </div>
                   </div>
-                  {msg.toolExecutions.map((exec, eIdx) => {
-                    const toolKey = `${idx}-${eIdx}`;
-                    const isExpanded = expandedTools[toolKey];
-                    return (
-                      <div key={eIdx} className="tool-execution-card">
-                        <div
-                          onClick={() => toggleToolExpand(toolKey)}
-                          style={{
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            fontWeight: 600,
-                          }}
-                        >
-                          <span>🛠️ {exec.tool}()</span>
-                          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                        </div>
-                        {isExpanded && (
-                          <div style={{ marginTop: '0.4rem', borderTop: '1px dashed var(--border)', paddingTop: '0.4rem' }}>
-                            <div style={{ color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Tool Arguments:</div>
-                            <pre style={{ margin: 0, overflowX: 'auto', maxHeight: '100px' }}>
-                              {JSON.stringify(exec.input, null, 2)}
-                            </pre>
-                            <div style={{ color: 'var(--text-muted)', marginTop: '0.4rem', marginBottom: '0.2rem' }}>
-                              Tool Database Response:
-                            </div>
-                            <pre style={{ margin: 0, overflowX: 'auto', maxHeight: '160px' }}>
-                              {JSON.stringify(exec.output, null, 2)}
-                            </pre>
+                )}
+
+                {/* Collapsible Executed Tools Drawer */}
+                {msg.toolExecutions && msg.toolExecutions.length > 0 && (
+                  <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }}>
+                    <div
+                      style={{
+                        fontSize: '0.725rem',
+                        fontWeight: 600,
+                        marginBottom: '0.35rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        color: 'var(--text-secondary)',
+                      }}
+                    >
+                      <Terminal size={12} />
+                      <span>Executed LangChain Tools ({msg.toolExecutions.length})</span>
+                    </div>
+                    {msg.toolExecutions.map((exec, eIdx) => {
+                      const toolKey = `${idx}-${eIdx}`;
+                      const isExpanded = expandedTools[toolKey];
+                      return (
+                        <div key={eIdx} className="tool-execution-card">
+                          <div
+                            onClick={() => toggleToolExpand(toolKey)}
+                            style={{
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              fontWeight: 600,
+                            }}
+                          >
+                            <span>🛠️ {exec.tool}()</span>
+                            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
+                          {isExpanded && (
+                            <div style={{ marginTop: '0.4rem', borderTop: '1px dashed var(--border)', paddingTop: '0.4rem' }}>
+                              <div style={{ color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Input Parameters:</div>
+                              <pre style={{ margin: 0, overflowX: 'auto', maxHeight: '100px' }}>
+                                {JSON.stringify(exec.input, null, 2)}
+                              </pre>
+                              <div style={{ color: 'var(--text-muted)', marginTop: '0.4rem', marginBottom: '0.2rem' }}>
+                                Database Output:
+                              </div>
+                              <pre style={{ margin: 0, overflowX: 'auto', maxHeight: '160px' }}>
+                                {JSON.stringify(exec.output, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           {loading && (
             <div className="chat-bubble assistant" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <RefreshCw size={14} className="spin" />
-              <span>Nexus AI is thinking and executing actions...</span>
+              <span>Nexus AI is evaluating tools and database records...</span>
             </div>
           )}
-          <div ref={chatEndRef} />
+          <div ref={chatEndRef} style={{ height: '1px' }} />
         </div>
 
         {/* Input Bar */}
         <form
           className="ai-chat-input-row"
+          style={{ flexShrink: 0 }}
           onSubmit={(e) => {
             e.preventDefault();
             sendMessage();
@@ -538,16 +646,16 @@ export default function NexusChat({ role, onActionCompleted }) {
             className="input-text"
             placeholder={
               role === 'admin'
-                ? 'Ask Nexus to inspect users, approve/reject/block, or check stats...'
+                ? 'Ask Nexus to check approvals, inspect orders, block/approve users...'
                 : role === 'seller'
-                ? 'Ask Nexus to add products, show earnings, or update orders...'
-                : 'Ask Nexus to browse products, buy items, or check your orders...'
+                ? 'Ask Nexus to add products, review orders, check revenue...'
+                : 'Ask Nexus to search products, purchase items, check order status...'
             }
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={loading}
+            disabled={loading || actionLoading}
           />
-          <button type="submit" className="btn btn-primary" disabled={loading || !input.trim()}>
+          <button type="submit" className="btn btn-primary" disabled={loading || actionLoading || !input.trim()}>
             <Send size={15} />
             Send
           </button>

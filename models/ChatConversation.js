@@ -14,6 +14,10 @@ const messageSchema = new mongoose.Schema({
     type: Array,
     default: [],
   },
+  pendingAction: {
+    type: Object,
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
@@ -37,6 +41,10 @@ const chatConversationSchema = new mongoose.Schema(
       type: String,
       default: 'New Conversation',
       trim: true,
+    },
+    pendingAction: {
+      type: Object,
+      default: null,
     },
     messages: [messageSchema],
   },

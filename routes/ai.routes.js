@@ -1,28 +1,27 @@
 const express = require('express');
 const router = express.Router();
 const ChatConversation = require('../models/ChatConversation');
-const { runMarketplaceChat, executeTool } = require('../services/ai.service');
+const { runMarketplaceChat, executeConfirmedWriteAction } = require('../services/ai.service');
 const { authenticate } = require('../middleware/auth');
 
-// All AI features require an authenticated session (Admin, Seller, or Buyer)
 router.use(authenticate);
 
-// Get service status
+// Get status
 router.get('/status', (req, res) => {
   const hasEnvKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here');
   res.json({
     status: 'online',
-    assistantName: 'Nexus AI Copilot',
+    assistantName: 'Nexus AI Copilot (LangChain)',
     hasApiKey: hasEnvKey,
     userRole: req.user.role,
   });
 });
 
-// List all conversations for current user
+// List conversations for user
 router.get('/conversations', async (req, res) => {
   try {
     const conversations = await ChatConversation.find({ user: req.user._id })
-      .select('_id title role createdAt updatedAt')
+      .select('_id title role pendingAction createdAt updatedAt')
       .sort({ updatedAt: -1 });
 
     res.json({ conversations });
@@ -31,7 +30,7 @@ router.get('/conversations', async (req, res) => {
   }
 });
 
-// Create a new conversation
+// Create conversation
 router.post('/conversations', async (req, res) => {
   try {
     const { title } = req.body;
@@ -42,7 +41,13 @@ router.post('/conversations', async (req, res) => {
       messages: [
         {
           role: 'assistant',
-          content: `Hello ${req.user.name}! I am **Nexus AI**, your marketplace assistant. Ask me anything about your ${req.user.role === 'admin' ? 'users, platform metrics, and orders' : req.user.role === 'seller' ? 'products, inventory, incoming orders, and earnings' : 'products to buy, orders, and profile'}.`,
+          content: `Hello ${req.user.name}! I am **Nexus AI**, your intelligent marketplace copilot powered by LangChain. How can I help you manage your ${
+            req.user.role === 'admin'
+              ? 'platform, users, and orders'
+              : req.user.role === 'seller'
+              ? 'inventory, earnings, and store operations'
+              : 'shopping catalog, purchases, and orders'
+          } today?`,
           toolExecutions: [],
         },
       ],
@@ -54,7 +59,7 @@ router.post('/conversations', async (req, res) => {
   }
 });
 
-// Get a specific conversation with all its messages
+// Get single conversation
 router.get('/conversations/:id', async (req, res) => {
   try {
     const conversation = await ChatConversation.findOne({
@@ -72,7 +77,7 @@ router.get('/conversations/:id', async (req, res) => {
   }
 });
 
-// Delete a conversation
+// Delete conversation
 router.delete('/conversations/:id', async (req, res) => {
   try {
     const result = await ChatConversation.findOneAndDelete({
@@ -90,10 +95,10 @@ router.delete('/conversations/:id', async (req, res) => {
   }
 });
 
-// Send message to a conversation
+// Send message in conversation
 router.post('/conversations/:id/messages', async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, confirmAction } = req.body;
     if (!message || !message.trim()) {
       return res.status(400).json({ message: 'Message content is required.' });
     }
@@ -113,54 +118,110 @@ router.post('/conversations/:id/messages', async (req, res) => {
       content: message.trim(),
     });
 
-    // Auto-title if it's the first user message and title was default
+    // Auto-title on first user message
     if (conversation.title === 'New Conversation' || !conversation.title) {
-      conversation.title = message.trim().slice(0, 30) + (message.length > 30 ? '...' : '');
+      conversation.title = message.trim().slice(0, 32) + (message.length > 32 ? '...' : '');
     }
 
-    // Run AI Copilot
+    const currentPending = conversation.pendingAction;
+
+    // Run LangChain Chat
     const aiResult = await runMarketplaceChat({
-      message: message.trim(),
+      message: confirmAction !== undefined ? (confirmAction ? 'yes' : 'no') : message.trim(),
       history: conversation.messages.slice(-8),
       currentUser: req.user,
+      pendingAction: currentPending,
     });
+
+    // Update conversation pending action
+    conversation.pendingAction = aiResult.pendingAction || null;
 
     // Append Assistant message
-    conversation.messages.push({
+    const assistantMsg = {
       role: 'assistant',
-      content: aiResult.reply || 'No response generated.',
+      content: aiResult.reply || 'Action processed.',
       toolExecutions: aiResult.toolExecutions || [],
-    });
+      pendingAction: aiResult.pendingAction || null,
+    };
 
+    conversation.messages.push(assistantMsg);
     await conversation.save();
 
     res.json({
       conversation,
-      latestMessage: conversation.messages[conversation.messages.length - 1],
+      latestMessage: assistantMsg,
       toolExecutions: aiResult.toolExecutions || [],
+      pendingAction: aiResult.pendingAction || null,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message || 'Error processing AI message' });
+    res.status(500).json({ message: error.message || 'Error processing message' });
   }
 });
 
-// Standalone quick chat endpoint (backwards compatible)
-router.post('/chat', async (req, res) => {
+// Explicit confirmation endpoint for button clicks
+router.post('/conversations/:id/action-decision', async (req, res) => {
   try {
-    const { message, history } = req.body;
-    if (!message || !message.trim()) {
-      return res.status(400).json({ message: 'Message text is required.' });
-    }
-
-    const result = await runMarketplaceChat({
-      message: message.trim(),
-      history: history || [],
-      currentUser: req.user,
+    const { confirmed } = req.body; // true or false
+    let conversation = await ChatConversation.findOne({
+      _id: req.params.id,
+      user: req.user._id,
     });
 
-    res.json(result);
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation not found' });
+    }
+
+    const pending = conversation.pendingAction;
+    if (!pending) {
+      return res.status(400).json({ message: 'No pending action waiting for confirmation.' });
+    }
+
+    let replyText = '';
+    const toolExecutions = [];
+
+    if (confirmed) {
+      const result = await executeConfirmedWriteAction({
+        tool: pending.tool,
+        args: pending.args,
+        currentUser: req.user,
+      });
+
+      toolExecutions.push({
+        tool: pending.tool,
+        input: pending.args,
+        output: result,
+      });
+
+      replyText = `✅ **Action Confirmed & Executed**\n\n${result.message || 'Changes have been committed to the database successfully.'}`;
+    } else {
+      replyText = `❌ **Action Cancelled**\n\nThe requested database operation has been cancelled. No changes were made.`;
+    }
+
+    // Add user note
+    conversation.messages.push({
+      role: 'user',
+      content: confirmed ? 'Confirm and apply changes' : 'Cancel this action',
+    });
+
+    // Add assistant response
+    const assistantMsg = {
+      role: 'assistant',
+      content: replyText,
+      toolExecutions,
+      pendingAction: null,
+    };
+
+    conversation.messages.push(assistantMsg);
+    conversation.pendingAction = null;
+    await conversation.save();
+
+    res.json({
+      conversation,
+      latestMessage: assistantMsg,
+      toolExecutions,
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message || 'Error in AI chat' });
+    res.status(500).json({ message: error.message || 'Error processing action decision' });
   }
 });
 
