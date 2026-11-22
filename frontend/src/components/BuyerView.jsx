@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { apiRequest } from '../api';
-import { Search, ShoppingCart, ShoppingBag, AlertCircle, RefreshCw, X, Check } from 'lucide-react';
+import NexusChat from './NexusChat';
+import { Search, ShoppingCart, ShoppingBag, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function BuyerView({ user }) {
-  const [tab, setTab] = useState('browse'); // 'browse' | 'orders'
+  // Show Chat Window first/default as requested in spec
+  const [tab, setTab] = useState('ai'); // 'ai' | 'browse' | 'orders'
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [search, setSearch] = useState('');
@@ -17,28 +19,22 @@ export default function BuyerView({ user }) {
   const isApproved = user.status === 'approved';
 
   useEffect(() => {
-    loadProducts();
-    loadMyOrders();
+    loadBuyerData();
   }, [search]);
 
-  const loadProducts = async () => {
+  const loadBuyerData = async () => {
     setLoading(true);
     try {
-      const res = await apiRequest(`/products?search=${search}&inStockOnly=true`);
-      setProducts(res.products || []);
+      const [prodRes, orderRes] = await Promise.all([
+        apiRequest(`/products?search=${search}&inStockOnly=true`),
+        apiRequest('/orders/my-orders'),
+      ]);
+      setProducts(prodRes.products || []);
+      setOrders(orderRes.orders || []);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadMyOrders = async () => {
-    try {
-      const res = await apiRequest('/orders/my-orders');
-      setOrders(res.orders || []);
-    } catch (err) {
-      console.error(err);
     }
   };
 
@@ -60,8 +56,7 @@ export default function BuyerView({ user }) {
         }),
       });
       setSelectedProduct(null);
-      loadProducts();
-      loadMyOrders();
+      loadBuyerData();
       setTab('orders');
     } catch (err) {
       alert(`Could not place order: ${err.message}`);
@@ -74,8 +69,7 @@ export default function BuyerView({ user }) {
     if (!window.confirm('Cancel this pending order?')) return;
     try {
       await apiRequest(`/orders/${orderId}/cancel`, { method: 'PATCH' });
-      loadMyOrders();
-      loadProducts();
+      loadBuyerData();
     } catch (err) {
       alert(`Error cancelling order: ${err.message}`);
     }
@@ -85,11 +79,11 @@ export default function BuyerView({ user }) {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Marketplace Catalog</h1>
-          <p className="page-subtitle">Search curated products, inspect discounts, and track purchases</p>
+          <h1 className="page-title">Buyer Marketplace & AI Copilot</h1>
+          <p className="page-subtitle">Shop directly through natural conversation or browse the catalog</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => { loadProducts(); loadMyOrders(); }}>
+          <button className="btn btn-secondary btn-sm" onClick={loadBuyerData}>
             <RefreshCw size={14} /> Refresh
           </button>
         </div>
@@ -99,20 +93,26 @@ export default function BuyerView({ user }) {
         <div className="alert-banner warning">
           <AlertCircle size={16} />
           <span>
-            <strong>Account Verification Pending:</strong> Your buyer account is pending admin approval. You can browse products, but placing orders requires verification.
+            <strong>Account Verification Pending:</strong> Your buyer account status is '{user.status}'. You can browse products, but placing orders requires admin approval.
           </span>
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tabs: Nexus AI Chat first, then Browse and My Orders */}
       <div className="tabs">
+        <button className={`tab-btn ${tab === 'ai' ? 'active' : ''}`} onClick={() => setTab('ai')}>
+          <Sparkles size={16} /> Nexus AI Copilot
+        </button>
         <button className={`tab-btn ${tab === 'browse' ? 'active' : ''}`} onClick={() => setTab('browse')}>
-          <ShoppingBag size={16} /> Browse Products ({products.length})
+          <ShoppingBag size={16} /> Browse Catalog ({products.length})
         </button>
         <button className={`tab-btn ${tab === 'orders' ? 'active' : ''}`} onClick={() => setTab('orders')}>
           <ShoppingCart size={16} /> My Orders ({orders.length})
         </button>
       </div>
+
+      {/* Tab: Nexus AI Chat */}
+      {tab === 'ai' && <NexusChat role="buyer" onActionCompleted={loadBuyerData} />}
 
       {/* Tab: Browse Products */}
       {tab === 'browse' && (
@@ -211,7 +211,7 @@ export default function BuyerView({ user }) {
                 {orders.length === 0 ? (
                   <tr>
                     <td colSpan="9" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
-                      You haven't placed any orders yet. Browse the catalog and place an order!
+                      You haven't placed any orders yet. Browse the catalog or tell Nexus AI to order an item!
                     </td>
                   </tr>
                 ) : (

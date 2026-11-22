@@ -75,7 +75,7 @@ export default function App() {
       <header className="navbar">
         <div className="nav-brand">
           <Layers size={20} />
-          <span>Marketplace Console</span>
+          <span>Nexus Marketplace</span>
           {user && (
             <span
               className="nav-badge"

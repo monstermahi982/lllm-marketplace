@@ -117,6 +117,41 @@ router.get('/seller-orders', authenticate, authorize('seller', 'admin'), async (
   }
 });
 
+// Seller: Get financial metrics and earnings
+router.get('/seller-earnings', authenticate, authorize('seller', 'admin'), async (req, res) => {
+  try {
+    const sellerId = req.user._id;
+
+    // Delivered / Completed Earnings
+    const deliveredAgg = await Order.aggregate([
+      { $match: { seller: sellerId, status: { $in: ['approved', 'completed'] } } },
+      { $group: { _id: null, totalEarnings: { $sum: '$totalPrice' }, count: { $sum: 1 }, unitsSold: { $sum: '$quantity' } } },
+    ]);
+
+    // Upcoming / Pending Earnings
+    const pendingAgg = await Order.aggregate([
+      { $match: { seller: sellerId, status: 'pending' } },
+      { $group: { _id: null, upcomingEarnings: { $sum: '$totalPrice' }, pendingCount: { $sum: 1 } } },
+    ]);
+
+    const deliveredEarnings = deliveredAgg[0]?.totalEarnings || 0;
+    const deliveredOrders = deliveredAgg[0]?.count || 0;
+    const unitsSold = deliveredAgg[0]?.unitsSold || 0;
+    const upcomingEarnings = pendingAgg[0]?.upcomingEarnings || 0;
+    const pendingOrdersCount = pendingAgg[0]?.pendingCount || 0;
+
+    res.json({
+      deliveredEarnings: Number(deliveredEarnings.toFixed(2)),
+      upcomingPendingEarnings: Number(upcomingEarnings.toFixed(2)),
+      totalCompletedOrders: deliveredOrders,
+      pendingOrdersCount,
+      totalUnitsSold: unitsSold,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Error fetching seller earnings' });
+  }
+});
+
 // Seller: Update order status (approved, rejected, completed)
 router.patch('/:id/seller-status', authenticate, authorize('seller', 'admin'), requireApproved, async (req, res) => {
   try {

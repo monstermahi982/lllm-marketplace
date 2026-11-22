@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { apiRequest } from '../api';
-import { Plus, UploadCloud, Package, ShoppingBag, RefreshCw, AlertCircle, Edit2, Trash2 } from 'lucide-react';
+import NexusChat from './NexusChat';
+import { Plus, Package, ShoppingBag, Sparkles, RefreshCw, AlertCircle, Trash2, DollarSign, TrendingUp } from 'lucide-react';
 
 export default function SellerView({ user }) {
-  const [tab, setTab] = useState('inventory'); // 'inventory' | 'orders'
+  // Chat window shown first/default as requested in spec
+  const [tab, setTab] = useState('ai'); // 'ai' | 'inventory' | 'orders'
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [earnings, setEarnings] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Single Product Modal
@@ -18,20 +21,6 @@ export default function SellerView({ user }) {
     discount: 0,
   });
 
-  // Bulk Product Modal
-  const [showBulkModal, setShowBulkModal] = useState(false);
-  const [bulkInput, setBulkInput] = useState(
-    JSON.stringify(
-      [
-        { title: 'USB-C Fast Charging Hub', description: '7-in-1 Aluminum Hub', quantity: 30, price: 39.99, discount: 5 },
-        { title: 'Wireless Ergonomic Mouse', description: 'Silent click with 2.4G & Bluetooth', quantity: 20, price: 29.5, discount: 10 },
-        { title: 'Desk Mat Leather 80x40cm', description: 'Waterproof dual-sided desk pad', quantity: 50, price: 18.0, discount: 0 },
-      ],
-      null,
-      2
-    )
-  );
-
   const isApproved = user.status === 'approved';
 
   useEffect(() => {
@@ -41,14 +30,16 @@ export default function SellerView({ user }) {
   const loadSellerData = async () => {
     setLoading(true);
     try {
-      const [prodRes, orderRes] = await Promise.all([
+      const [prodRes, orderRes, earningsRes] = await Promise.all([
         apiRequest('/products/seller/mine'),
         apiRequest('/orders/seller-orders'),
+        apiRequest('/orders/seller-earnings'),
       ]);
       setProducts(prodRes.products || []);
       setOrders(orderRes.orders || []);
+      setEarnings(earningsRes);
     } catch (err) {
-      console.error(err);
+      console.error('Error fetching seller data:', err);
     } finally {
       setLoading(false);
     }
@@ -69,23 +60,8 @@ export default function SellerView({ user }) {
     }
   };
 
-  const handleBulkUpload = async () => {
-    try {
-      const items = JSON.parse(bulkInput);
-      if (!Array.isArray(items)) throw new Error('Data must be a JSON array of product objects.');
-      await apiRequest('/products/bulk', {
-        method: 'POST',
-        body: JSON.stringify({ items }),
-      });
-      setShowBulkModal(false);
-      loadSellerData();
-    } catch (err) {
-      alert(`Bulk create failed: ${err.message}`);
-    }
-  };
-
   const handleDeleteProduct = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this product?')) return;
+    if (!window.confirm('Delete this product from your catalog?')) return;
     try {
       await apiRequest(`/products/${id}`, { method: 'DELETE' });
       loadSellerData();
@@ -110,20 +86,12 @@ export default function SellerView({ user }) {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Seller Hub</h1>
-          <p className="page-subtitle">Manage catalog, bulk upload inventory, and fulfill customer orders</p>
+          <h1 className="page-title">Seller Hub & Nexus Copilot</h1>
+          <p className="page-subtitle">Manage inventory, fulfill orders, track revenue, and leverage AI to automate store operations</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button className="btn btn-secondary btn-sm" onClick={loadSellerData}>
-            <RefreshCw size={14} /> Refresh
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => setShowBulkModal(true)}
-            disabled={!isApproved}
-            title={!isApproved ? 'Admin approval required' : ''}
-          >
-            <UploadCloud size={14} /> Bulk Add
+            <RefreshCw size={14} /> Refresh Data
           </button>
           <button
             className="btn btn-primary btn-sm"
@@ -140,20 +108,56 @@ export default function SellerView({ user }) {
         <div className="alert-banner warning">
           <AlertCircle size={16} />
           <span>
-            <strong>Account Pending Verification:</strong> Your seller account is currently '{user.status}'. You must be verified by the admin before creating products or managing active inventory.
+            <strong>Account Pending Verification:</strong> Your seller account status is '{user.status}'. You must be approved by the admin before creating products or managing active inventory.
           </span>
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Seller Financial Stats & Earnings Overview */}
+      {earnings && (
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-label">Delivered Earnings</div>
+            <div className="stat-value" style={{ color: 'var(--success-text)' }}>
+              ${earnings.deliveredEarnings}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Upcoming / Pending Earnings</div>
+            <div className="stat-value" style={{ color: '#b45309' }}>
+              ${earnings.upcomingPendingEarnings}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Active Products</div>
+            <div className="stat-value">{products.length}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Pending Orders</div>
+            <div className="stat-value">{earnings.pendingOrdersCount}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Total Units Sold</div>
+            <div className="stat-value">{earnings.totalUnitsSold}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Tabs: Nexus AI Chat first, then Inventory and Orders */}
       <div className="tabs">
+        <button className={`tab-btn ${tab === 'ai' ? 'active' : ''}`} onClick={() => setTab('ai')}>
+          <Sparkles size={16} /> Nexus AI Copilot
+        </button>
         <button className={`tab-btn ${tab === 'inventory' ? 'active' : ''}`} onClick={() => setTab('inventory')}>
-          <Package size={16} /> My Inventory ({products.length})
+          <Package size={16} /> Inventory ({products.length})
         </button>
         <button className={`tab-btn ${tab === 'orders' ? 'active' : ''}`} onClick={() => setTab('orders')}>
           <ShoppingBag size={16} /> Incoming Orders ({orders.length})
         </button>
       </div>
+
+      {/* Tab: Nexus AI Chat */}
+      {tab === 'ai' && <NexusChat role="seller" onActionCompleted={loadSellerData} />}
 
       {/* Tab: Inventory */}
       {tab === 'inventory' && (
@@ -175,7 +179,7 @@ export default function SellerView({ user }) {
                 {products.length === 0 ? (
                   <tr>
                     <td colSpan="7" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
-                      No products added yet. Click "+ Add Product" or "Bulk Add" above.
+                      No products added yet. Click "+ Add Product" or ask Nexus AI to add products!
                     </td>
                   </tr>
                 ) : (
@@ -326,7 +330,7 @@ export default function SellerView({ user }) {
                   rows={2}
                   value={newProduct.description}
                   onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })}
-                  placeholder="Key features and details..."
+                  placeholder="Key features and specifications..."
                 />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
@@ -374,35 +378,6 @@ export default function SellerView({ user }) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk Add Modal */}
-      {showBulkModal && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '600px' }}>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 600, marginBottom: '0.5rem' }}>Bulk Create Products</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-              Paste a JSON array of products with title, quantity, price, and optional discount:
-            </p>
-            <div className="form-group">
-              <textarea
-                className="input-textarea"
-                rows={8}
-                style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}
-                value={bulkInput}
-                onChange={(e) => setBulkInput(e.target.value)}
-              />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <button className="btn btn-secondary" onClick={() => setShowBulkModal(false)}>
-                Cancel
-              </button>
-              <button className="btn btn-primary" onClick={handleBulkUpload}>
-                Upload Products
-              </button>
-            </div>
           </div>
         </div>
       )}

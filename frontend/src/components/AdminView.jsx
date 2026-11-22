@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { apiRequest } from '../api';
-import AiAssistant from './AiAssistant';
-import { Users, ShoppingBag, ShieldCheck, RefreshCw, Check, X, Ban, Search, DollarSign } from 'lucide-react';
+import NexusChat from './NexusChat';
+import { Users, ShoppingBag, Sparkles, RefreshCw, Check, X, Ban, Search } from 'lucide-react';
 
 export default function AdminView() {
-  const [tab, setTab] = useState('users'); // 'users' | 'orders' | 'ai'
+  // Show Chat Window by default as requested in spec
+  const [tab, setTab] = useState('ai'); // 'ai' | 'users' | 'orders'
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -70,15 +71,15 @@ export default function AdminView() {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Admin Operations Console</h1>
-          <p className="page-subtitle">Verify user profiles, oversee orders, and orchestrate with Gemini AI tools</p>
+          <h1 className="page-title">Admin Command Console</h1>
+          <p className="page-subtitle">Nexus AI Copilot with autonomous platform actions, user verification, and orders oversight</p>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={loadData}>
-          <RefreshCw size={14} /> Refresh
+          <RefreshCw size={14} /> Refresh Data
         </button>
       </div>
 
-      {/* Analytics Grid */}
+      {/* Analytics Summary */}
       {stats && (
         <div className="stats-grid">
           <div className="stat-card">
@@ -86,38 +87,41 @@ export default function AdminView() {
             <div className="stat-value">{stats.totalUsers}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Pending Verifications</div>
+            <div className="stat-label">Pending Verification</div>
             <div className="stat-value" style={{ color: stats.pendingUsers > 0 ? '#b45309' : 'inherit' }}>
               {stats.pendingUsers}
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Total Products</div>
+            <div className="stat-label">Active Products</div>
             <div className="stat-value">{stats.totalProducts}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Total Orders</div>
+            <div className="stat-label">Platform Orders</div>
             <div className="stat-value">{stats.totalOrders}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Platform Sales</div>
+            <div className="stat-label">Gross Sales</div>
             <div className="stat-value">${Number(stats.totalSales).toFixed(2)}</div>
           </div>
         </div>
       )}
 
-      {/* Navigation Tabs */}
+      {/* Navigation Tabs - Chat window is first/default */}
       <div className="tabs">
+        <button className={`tab-btn ${tab === 'ai' ? 'active' : ''}`} onClick={() => setTab('ai')}>
+          <Sparkles size={16} /> Nexus AI Copilot
+        </button>
         <button className={`tab-btn ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>
           <Users size={16} /> User Management ({users.length})
         </button>
         <button className={`tab-btn ${tab === 'orders' ? 'active' : ''}`} onClick={() => setTab('orders')}>
           <ShoppingBag size={16} /> Orders Oversight ({orders.length})
         </button>
-        <button className={`tab-btn ${tab === 'ai' ? 'active' : ''}`} onClick={() => setTab('ai')}>
-          <ShieldCheck size={16} /> AI Assistant (LLM Tools)
-        </button>
       </div>
+
+      {/* Tab: Nexus AI Chat */}
+      {tab === 'ai' && <NexusChat role="admin" onActionCompleted={loadData} />}
 
       {/* Tab: Users Management */}
       {tab === 'users' && (
@@ -136,7 +140,7 @@ export default function AdminView() {
               <input
                 type="text"
                 className="input-text"
-                placeholder="Search by user name or email..."
+                placeholder="Search user by name or email..."
                 value={searchUser}
                 onChange={(e) => setSearchUser(e.target.value)}
               />
@@ -182,7 +186,7 @@ export default function AdminView() {
                 {filteredUsers.length === 0 ? (
                   <tr>
                     <td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                      No users match the criteria.
+                      No users match your criteria.
                     </td>
                   </tr>
                 ) : (
@@ -336,9 +340,6 @@ export default function AdminView() {
           </div>
         </div>
       )}
-
-      {/* Tab: AI Assistant */}
-      {tab === 'ai' && <AiAssistant onActionCompleted={loadData} />}
     </div>
   );
 }
